@@ -94,6 +94,46 @@ app.get("/api/terms", (_req, res) => {
 });
 
 /** 继续领取会话开测（一码一测） */
+
+app.post("/api/quiz/claim", (req, res) => {
+  try {
+    const ip = clientIp(req);
+    if (!rateLimit(`claim:${ip}`, 20, 60_000)) {
+      return res.status(429).json({ error: "请求过于频繁，请稍后再试" });
+    }
+    const codeText = req.body && req.body.code;
+    const row = db.getCodeByText(codeText);
+    if (!row) return res.status(400).json({ error: "兑换码无效" });
+    if (!row.token) return res.status(400).json({ error: "兑换码缺少发货令牌，请联系商家" });
+    const result = db.openDeliveryToken(row.token, {
+      userAgent: req.get("user-agent") || "",
+    });
+    if (result.status === "ok") {
+      return res.json({
+        sessionId: result.sessionId,
+        code: result.code,
+        claimExpiresAt: result.claimExpiresAt,
+        quizPath: result.quizPath,
+      });
+    }
+    if (result.status === "already_opened") {
+      return res.status(400).json({
+        error: result.submitted
+          ? "该兑换码已测过，不能再次使用"
+          : result.expired
+            ? "领取资格已过期，请联系商家重新发货"
+            : "该兑换码已领取过，请使用当时的测验链接，或联系商家",
+      });
+    }
+    if (result.status === "disabled") {
+      return res.status(400).json({ error: "兑换码已停用" });
+    }
+    return res.status(400).json({ error: "兑换失败" });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message || "兑换失败" });
+  }
+});
+
 app.post("/api/quiz/start", (req, res) => {
   try {
     const sessionId = req.body && req.body.sessionId;

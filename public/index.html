@@ -33,8 +33,14 @@
         <li>14 题单选</li>
         <li>24 种节气结果</li>
       </ul>
+      <div class="code-wrap" id="redeem-gate">
+        <label class="code-label" for="code-input">兑换码 / 卡密</label>
+        <input type="text" id="code-input" class="code-input" placeholder="输入商家发给你的卡密" autocomplete="off" />
+        <p class="code-hint" id="gate-hint">也可直接打开发货链接领取。一码一测，提交后不可重测。</p>
+        <p class="code-hint" id="gate-session" hidden></p>
+      </div>
       <button type="button" class="btn btn-primary" id="btn-start">开始入候</button>
-      <p class="disclaimer">一码一测：需商家发货链接领取后作答。本测验仅供娱乐与自我反思，不构成任何心理或医学评估。</p>
+      <p class="disclaimer">一码一测：输入卡密或打开发货链接后作答。本测验仅供娱乐与自我反思，不构成任何心理或医学评估。</p>
     </section>
 
     <section class="screen screen-quiz" id="screen-quiz" aria-labelledby="question-text" hidden>

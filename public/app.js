@@ -36,13 +36,26 @@
   let lastResult = null;
 
   function ensureGateUI() {
-    if (document.getElementById("redeem-gate")) return;
+    if (document.getElementById("redeem-gate")) {
+      if (!document.getElementById("code-input")) {
+        const wrap = document.getElementById("redeem-gate");
+        const hint = document.getElementById("gate-hint");
+        const inputHtml =
+          '<label class="code-label" for="code-input">兑换码 / 卡密</label>' +
+          '<input type="text" id="code-input" class="code-input" placeholder="输入商家发给你的卡密" autocomplete="off" />';
+        wrap.insertAdjacentHTML("afterbegin", inputHtml);
+        if (hint) hint.textContent = "也可直接打开发货链接领取。一码一测，提交后不可重测。";
+      }
+      return;
+    }
     const btn = els.btnStart;
     const wrap = document.createElement("div");
     wrap.className = "code-wrap";
     wrap.id = "redeem-gate";
     wrap.innerHTML =
-      '<p class="code-hint" id="gate-hint">本测验为一码一测：请通过商家发货链接领取后进入。打开发货页会展示卡密，并自动获得一次测验资格。</p>' +
+      '<label class="code-label" for="code-input">兑换码 / 卡密</label>' +
+      '<input type="text" id="code-input" class="code-input" placeholder="输入商家发给你的卡密" autocomplete="off" />' +
+      '<p class="code-hint" id="gate-hint">也可直接打开发货链接领取。一码一测，提交后不可重测。</p>' +
       '<p class="code-hint" id="gate-session" hidden></p>';
     btn.parentNode.insertBefore(wrap, btn);
   }
@@ -258,14 +271,32 @@
   els.btnStart.addEventListener("click", async () => {
     ensureGateUI();
     const q = readQuery();
-    const sid = sessionId || q.session || localStorage.getItem("xinxiang-claim-session") || "";
-    if (!sid) {
-      alert("请先打开商家发货链接领取资格（一码一测）。");
+    const codeInput = document.getElementById("code-input");
+    const codeTyped = (codeInput && codeInput.value ? codeInput.value : "").trim();
+    let sid = sessionId || q.session || localStorage.getItem("xinxiang-claim-session") || "";
+    const code = codeTyped || q.code || "";
+    if (!sid && !code) {
+      alert("请输入兑换码，或打开商家发货链接后再开始。");
+      if (codeInput) codeInput.focus();
       return;
     }
     els.btnStart.disabled = true;
     els.btnStart.textContent = "入候中…";
     try {
+      if (!sid && code) {
+        const claimed = await api("/api/quiz/claim", {
+          method: "POST",
+          body: JSON.stringify({ code }),
+        });
+        sid = claimed.sessionId;
+        sessionId = sid;
+        localStorage.setItem("xinxiang-claim-session", sid);
+        const gate = document.getElementById("gate-session");
+        if (gate) {
+          gate.hidden = false;
+          gate.textContent = "兑换成功，可开始测验（一码一测）。";
+        }
+      }
       const data = await api("/api/quiz/start", {
         method: "POST",
         body: JSON.stringify({ sessionId: sid }),
@@ -280,6 +311,7 @@
     } catch (e) {
       alert(e.message || "无法开始测验");
       localStorage.removeItem("xinxiang-claim-session");
+      sessionId = null;
     } finally {
       els.btnStart.disabled = false;
       els.btnStart.textContent = "开始入候";
