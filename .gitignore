@@ -1,0 +1,9 @@
+node_modules/
+data/*.sqlite
+data/*.sqlite-*
+data/INITIAL_ADMIN_PASSWORD.txt
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log

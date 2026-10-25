@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="心象节气——测测你是哪一候。二十四节气对应的内在气候。娱乐向自我探索，非医学诊断。" />
+  <meta name="theme-color" content="#d8e8d4" />
+  <title>心象节气 · 二十四候测验</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Noto+Sans+SC:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="bg-orbs" aria-hidden="true">
+    <span class="orb orb-a"></span>
+    <span class="orb orb-b"></span>
+    <span class="orb orb-c"></span>
+  </div>
+
+  <main class="app" id="app">
+    <section class="screen screen-landing is-active" id="screen-landing" aria-labelledby="landing-title">
+      <p class="eyebrow">娱乐向 · 自我探索</p>
+      <h1 id="landing-title" class="title">心象节气</h1>
+      <p class="subtitle">二十四候，对照你的内在气候</p>
+      <p class="lead">
+        古人用节气读天地。<br />
+        我们借它读一读你——<br />
+        此刻，你更像哪一候的心？
+      </p>
+      <ul class="meta-list">
+        <li>约 4 分钟</li>
+        <li>14 题单选</li>
+        <li>24 种节气结果</li>
+      </ul>
+      <button type="button" class="btn btn-primary" id="btn-start">开始入候</button>
+      <p class="disclaimer">本测验仅供娱乐与自我反思，不构成任何心理或医学评估。</p>
+    </section>
+
+    <section class="screen screen-quiz" id="screen-quiz" aria-labelledby="question-text" hidden>
+      <div class="progress-wrap">
+        <div class="progress-bar" id="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+        <p class="progress-label">
+          <span id="mood-label" class="mood-label"></span>
+          <span><span id="progress-current">1</span> / <span id="progress-total">14</span></span>
+        </p>
+      </div>
+      <h2 class="question" id="question-text"></h2>
+      <div class="options" id="options" role="listbox" aria-labelledby="question-text"></div>
+      <button type="button" class="btn btn-ghost btn-back" id="btn-back" hidden>上一题</button>
+    </section>
+
+    <section class="screen screen-analyzing" id="screen-analyzing" hidden aria-live="polite">
+      <div class="pulse-ring" aria-hidden="true"></div>
+      <p class="analyzing-text">正在对照二十四候…</p>
+    </section>
+
+    <section class="screen screen-result" id="screen-result" hidden aria-labelledby="result-title">
+      <p class="eyebrow result-eyebrow" id="result-season"></p>
+      <h2 class="result-title" id="result-title"></h2>
+      <p class="result-meaning" id="result-meaning"></p>
+      <p class="result-poem" id="result-poem"></p>
+      <p class="result-flavor" id="result-flavor" hidden></p>
+      <div class="result-culture" id="result-culture" hidden>
+        <p class="culture-line"><span class="culture-label">物候</span> <span id="result-phenology"></span></p>
+        <p class="culture-line"><span class="culture-label">习俗意象</span> <span id="result-ritual"></span></p>
+      </div>
+      <div class="result-deep-wrap">
+        <h3 class="card-heading">深度解读</h3>
+        <div class="result-deep" id="result-deep"></div>
+      </div>
+      <div class="result-card">
+        <h3 class="card-heading">你的光亮</h3>
+        <ul class="strengths" id="result-strengths"></ul>
+        <h3 class="card-heading blind">温柔的盲点</h3>
+        <p class="blind-spot" id="result-blind"></p>
+      </div>
+      <blockquote class="share-line" id="share-line"></blockquote>
+      <div class="result-actions">
+        <button type="button" class="btn btn-primary" id="btn-copy">复制分享文案</button>
+        <button type="button" class="btn btn-ghost" id="btn-retry">再测一次</button>
+      </div>
+      <p class="copy-toast" id="copy-toast" hidden>已复制到剪贴板</p>
+      <p class="disclaimer">娱乐向自我探索 · 非医学诊断</p>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

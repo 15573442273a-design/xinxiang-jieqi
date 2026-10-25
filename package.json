@@ -1,0 +1,21 @@
+{
+  "name": "xinxiang-jieqi",
+  "version": "1.0.0",
+  "description": "心象节气——二十四节气心理气质测验（娱乐向）+ 兑换码后台",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "express": "^4.21.2"
+  },
+  "allowScripts": {
+    "better-sqlite3@11.10.0": true
+  }
+}
