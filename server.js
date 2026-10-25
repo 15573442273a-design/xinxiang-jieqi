@@ -14,6 +14,9 @@ const PUBLIC_BASE =
     ""
   );
 
+/** 临时开放免码试玩；设 ALLOW_FREE_PLAY=0 可恢复必须兑换码 */
+const ALLOW_FREE_PLAY = process.env.ALLOW_FREE_PLAY !== "0";
+
 const boot = db.ensureAdminPassword();
 const adminTokens = new Map(); // token -> expiry
 
@@ -61,7 +64,8 @@ function publicMeta() {
     questionCount: clientQuestions().length,
     termCount: TERM_ORDER.length,
     disclaimer: "本测验仅供娱乐与自我反思，不构成任何心理或医学评估。",
-    requireRedeem: true,
+    requireRedeem: !ALLOW_FREE_PLAY,
+    freePlay: ALLOW_FREE_PLAY,
     publicBase: PUBLIC_BASE,
   };
 }
@@ -137,17 +141,37 @@ app.post("/api/quiz/claim", (req, res) => {
 app.post("/api/quiz/start", (req, res) => {
   try {
     const sessionId = req.body && req.body.sessionId;
+    const ip = clientIp(req);
+
+    // 无会话：免费试玩开局（临时默认开启）
     if (!sessionId) {
-      return res.status(400).json({
-        error: "请先打开商家发货链接领取资格（一码一测）",
+      if (!ALLOW_FREE_PLAY) {
+        return res.status(400).json({
+          error: "请先打开商家发货链接领取资格（一码一测）",
+        });
+      }
+      if (!rateLimit(`free-start:${ip}`, 30, 60_000)) {
+        return res.status(429).json({ error: "请求过于频繁，请稍后再试" });
+      }
+      const attempt = db.createFreePlayAttempt({
+        userAgent: req.get("user-agent") || "",
+      });
+      return res.json({
+        sessionId: attempt.session_id,
+        codeApplied: false,
+        freePlay: true,
+        questions: clientQuestions(),
+        meta: publicMeta(),
       });
     }
-    const { attempt, codeRow } = db.resumeClaimSession(sessionId);
+
+    const { attempt, codeRow, freePlay } = db.resumeClaimSession(sessionId);
     res.json({
       sessionId: attempt.session_id,
-      codeApplied: true,
-      code: codeRow.code,
-      claimExpiresAt: codeRow.claim_expires_at,
+      codeApplied: Boolean(codeRow),
+      freePlay: Boolean(freePlay),
+      code: codeRow ? codeRow.code : null,
+      claimExpiresAt: codeRow ? codeRow.claim_expires_at : null,
       questions: clientQuestions(),
       meta: publicMeta(),
     });
@@ -451,6 +475,7 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`测验首页: http://127.0.0.1:${PORT}/`);
   console.log(`管理后台: http://127.0.0.1:${PORT}/admin.html`);
   console.log(`发货域名: ${PUBLIC_BASE}/redeem/<token>`);
+  console.log(`免码试玩: ${ALLOW_FREE_PLAY ? "开启" : "关闭"}`);
   console.log(`SQLite: ${db.dbPath}`);
   if (boot.generated) {
     console.log("========================================");

@@ -41,10 +41,10 @@
         const wrap = document.getElementById("redeem-gate");
         const hint = document.getElementById("gate-hint");
         const inputHtml =
-          '<label class="code-label" for="code-input">兑换码 / 卡密</label>' +
-          '<input type="text" id="code-input" class="code-input" placeholder="输入商家发给你的卡密" autocomplete="off" />';
+          '<label class="code-label" for="code-input">兑换码 / 卡密（可选）</label>' +
+          '<input type="text" id="code-input" class="code-input" placeholder="有卡密可在此输入，没有直接点开始" autocomplete="off" />';
         wrap.insertAdjacentHTML("afterbegin", inputHtml);
-        if (hint) hint.textContent = "也可直接打开发货链接领取。一码一测，提交后不可重测。";
+        if (hint) hint.textContent = "当前可直接开测（临时免码）。若有卡密也可输入。";
       }
       return;
     }
@@ -53,9 +53,9 @@
     wrap.className = "code-wrap";
     wrap.id = "redeem-gate";
     wrap.innerHTML =
-      '<label class="code-label" for="code-input">兑换码 / 卡密</label>' +
-      '<input type="text" id="code-input" class="code-input" placeholder="输入商家发给你的卡密" autocomplete="off" />' +
-      '<p class="code-hint" id="gate-hint">也可直接打开发货链接领取。一码一测，提交后不可重测。</p>' +
+      '<p class="code-hint" id="gate-hint">当前可直接开测（临时免码）。若有卡密也可输入。</p>' +
+      '<label class="code-label" for="code-input">兑换码 / 卡密（可选）</label>' +
+      '<input type="text" id="code-input" class="code-input" placeholder="有卡密可在此输入，没有直接点开始" autocomplete="off" />' +
       '<p class="code-hint" id="gate-session" hidden></p>';
     btn.parentNode.insertBefore(wrap, btn);
   }
@@ -233,14 +233,15 @@
     answers = [];
     lastResult = null;
     questions = [];
-    // 一码一测：不清除已提交会话提示；用户需新发货链接
+    sessionId = null;
+    localStorage.removeItem("xinxiang-claim-session");
     const t = els.analyzing.querySelector(".analyzing-text");
     if (t) t.textContent = "正在对照二十四候…";
     showScreen("landing");
     const gate = document.getElementById("gate-session");
     if (gate) {
       gate.hidden = false;
-      gate.textContent = "一码一测：同一兑换无法再次开测。如需重测请联系商家重新发货。";
+      gate.textContent = "可直接再测一次（临时免码）。若使用卡密，同一码仍不可重复开测。";
     }
   }
 
@@ -275,11 +276,6 @@
     const codeTyped = (codeInput && codeInput.value ? codeInput.value : "").trim();
     let sid = sessionId || q.session || localStorage.getItem("xinxiang-claim-session") || "";
     const code = codeTyped || q.code || "";
-    if (!sid && !code) {
-      alert("请输入兑换码，或打开商家发货链接后再开始。");
-      if (codeInput) codeInput.focus();
-      return;
-    }
     els.btnStart.disabled = true;
     els.btnStart.textContent = "入候中…";
     try {
@@ -297,12 +293,17 @@
           gate.textContent = "兑换成功，可开始测验（一码一测）。";
         }
       }
+      // 无会话且无卡密：走免码试玩（服务端创建 FREE 会话）
       const data = await api("/api/quiz/start", {
         method: "POST",
-        body: JSON.stringify({ sessionId: sid }),
+        body: JSON.stringify(sid ? { sessionId: sid } : {}),
       });
       sessionId = data.sessionId;
-      localStorage.setItem("xinxiang-claim-session", sessionId);
+      if (data.freePlay) {
+        localStorage.removeItem("xinxiang-claim-session");
+      } else {
+        localStorage.setItem("xinxiang-claim-session", sessionId);
+      }
       questions = data.questions;
       answers = Array(questions.length).fill(null);
       index = 0;

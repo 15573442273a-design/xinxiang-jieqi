@@ -389,8 +389,17 @@ function getAttempt(sessionId) {
   return db.prepare(`SELECT * FROM attempts WHERE session_id = ?`).get(sessionId);
 }
 
+function createFreePlayAttempt({ userAgent } = {}) {
+  const sessionId = crypto.randomBytes(16).toString("hex");
+  db.prepare(
+    `INSERT INTO attempts (session_id, code_id, code_text, user_agent) VALUES (?, NULL, ?, ?)`
+  ).run(sessionId, "FREE", userAgent || null);
+  return getAttempt(sessionId);
+}
+
 /**
  * 用领取会话继续测验：须未提交、未过期、且绑定该码。
+ * 免费试玩会话（无 code_id）仅校验存在且未提交。
  */
 function resumeClaimSession(sessionId) {
   const sid = String(sessionId || "").trim();
@@ -406,11 +415,21 @@ function resumeClaimSession(sessionId) {
     throw err;
   }
   if (attempt.submitted_at) {
-    const err = new Error("该兑换已完成测验，无法重测（一码一测）");
+    const err = new Error(
+      attempt.code_id
+        ? "该兑换已完成测验，无法重测（一码一测）"
+        : "该试玩会话已提交，请重新开始"
+    );
     err.status = 400;
     throw err;
   }
-  const codeRow = attempt.code_id ? getCodeById(attempt.code_id) : null;
+
+  // 免费试玩：无兑换码绑定
+  if (!attempt.code_id) {
+    return { attempt, codeRow: null, freePlay: true };
+  }
+
+  const codeRow = getCodeById(attempt.code_id);
   if (!codeRow || codeRow.quiz_session_id !== sid) {
     const err = new Error("会话与兑换码不匹配");
     err.status = 400;
@@ -426,7 +445,7 @@ function resumeClaimSession(sessionId) {
     err.status = 400;
     throw err;
   }
-  return { attempt, codeRow };
+  return { attempt, codeRow, freePlay: false };
 }
 
 function submitAttempt(sessionId, { resultTerm, answers, scores, consume }) {
@@ -511,6 +530,7 @@ module.exports = {
   getCodeByQuizSession,
   openDeliveryToken,
   resumeClaimSession,
+  createFreePlayAttempt,
   claimTtlHours,
   makeDeliveryToken,
 };
