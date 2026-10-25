@@ -60,6 +60,46 @@ CREATE INDEX IF NOT EXISTS idx_attempts_term ON attempts(result_term);
 CREATE INDEX IF NOT EXISTS idx_attempts_code ON attempts(code_id);
 `);
 
+function columnNames(table) {
+  return db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+}
+
+function migrateRedeemSchema() {
+  const cols = columnNames("redeem_codes");
+  const add = (name, ddl) => {
+    if (!cols.includes(name)) {
+      db.exec(`ALTER TABLE redeem_codes ADD COLUMN ${ddl}`);
+      cols.push(name);
+    }
+  };
+  add("token", "token TEXT");
+  add("max_opens", "max_opens INTEGER NOT NULL DEFAULT 1");
+  add("open_count", "open_count INTEGER NOT NULL DEFAULT 0");
+  add("opened_at", "opened_at TEXT");
+  add("used_at", "used_at TEXT");
+  add("quiz_session_id", "quiz_session_id TEXT");
+  add("claim_expires_at", "claim_expires_at TEXT");
+
+  const missing = db
+    .prepare(`SELECT id FROM redeem_codes WHERE token IS NULL OR token = ''`)
+    .all();
+  if (missing.length) {
+    const upd = db.prepare(`UPDATE redeem_codes SET token = ? WHERE id = ?`);
+    const tx = db.transaction((rows) => {
+      for (const r of rows) {
+        upd.run(crypto.randomBytes(18).toString("base64url"), r.id);
+      }
+    });
+    tx(missing);
+  }
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_redeem_token ON redeem_codes(token)`);
+  db.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_redeem_quiz_session ON redeem_codes(quiz_session_id) WHERE quiz_session_id IS NOT NULL`
+  );
+}
+
+migrateRedeemSchema();
+
 function getSetting(key) {
   const row = db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(key);
   return row ? row.value : null;
@@ -96,10 +136,6 @@ function verifyPassword(password, stored) {
   return crypto.timingSafeEqual(actual, expected);
 }
 
-/**
- * 若库中尚无管理员哈希：用 ADMIN_PASSWORD 引导，否则生成强随机密码并写入。
- * @returns {{ generated: string|null, fromEnv: boolean }}
- */
 function ensureAdminPassword() {
   const existing = getSetting("admin_password_hash");
   if (existing) return { generated: null, fromEnv: false };
@@ -119,9 +155,7 @@ function ensureAdminPassword() {
 
 function verifyAdminPassword(password) {
   const stored = getSetting("admin_password_hash");
-  if (!stored) {
-    ensureAdminPassword();
-  }
+  if (!stored) ensureAdminPassword();
   return verifyPassword(password, getSetting("admin_password_hash"));
 }
 
@@ -150,16 +184,31 @@ function normalizeCode(code) {
   return String(code || "").trim().toUpperCase();
 }
 
-function createCode({ code, note = "", maxUses = 1 }) {
+function makeDeliveryToken() {
+  return crypto.randomBytes(18).toString("base64url");
+}
+
+/** 领取后须在多久内完成测验（小时），默认 24 */
+function claimTtlHours() {
+  const n = Number(process.env.CLAIM_TTL_HOURS);
+  return Number.isFinite(n) && n > 0 ? n : 24;
+}
+
+function createCode({ code, note = "", maxUses = 1, maxOpens = 1 }) {
   const c = normalizeCode(code);
   if (!c || c.length < 4) {
     const err = new Error("兑换码至少 4 位");
     err.status = 400;
     throw err;
   }
+  const token = makeDeliveryToken();
+  const opens = Math.max(1, Number(maxOpens) || 1);
   const info = db
-    .prepare(`INSERT INTO redeem_codes (code, note, max_uses) VALUES (?, ?, ?)`)
-    .run(c, note || "", Math.max(1, Number(maxUses) || 1));
+    .prepare(
+      `INSERT INTO redeem_codes (code, note, max_uses, token, max_opens, open_count)
+       VALUES (?, ?, ?, ?, ?, 0)`
+    )
+    .run(c, note || "", Math.max(1, Number(maxUses) || 1), token, opens);
   return getCodeById(info.lastInsertRowid);
 }
 
@@ -173,6 +222,18 @@ function getCodeByText(code) {
     .get(normalizeCode(code));
 }
 
+function getCodeByToken(token) {
+  const t = String(token || "").trim();
+  if (!t) return null;
+  return db.prepare(`SELECT * FROM redeem_codes WHERE token = ?`).get(t);
+}
+
+function getCodeByQuizSession(sessionId) {
+  return db
+    .prepare(`SELECT * FROM redeem_codes WHERE quiz_session_id = ?`)
+    .get(sessionId);
+}
+
 function listCodes() {
   return db.prepare(`SELECT * FROM redeem_codes ORDER BY id DESC`).all();
 }
@@ -182,8 +243,106 @@ function setCodeActive(id, active) {
   return getCodeById(id);
 }
 
+function isClaimExpired(row) {
+  if (!row || !row.claim_expires_at) return false;
+  // SQLite datetime('now') 为 UTC：YYYY-MM-DD HH:MM:SS
+  const raw = String(row.claim_expires_at).trim().replace(" ", "T");
+  const expMs = Date.parse(raw.endsWith("Z") ? raw : raw + "Z");
+  if (!Number.isFinite(expMs)) return false;
+  return Date.now() > expMs;
+}
+
+/**
+ * 发货链接首次打开：原子核销、展示卡密，并创建一码一测会话。
+ * 再次打开：不返回 code。
+ */
+function openDeliveryToken(token, { userAgent } = {}) {
+  const t = String(token || "").trim();
+  if (!t || t.length < 8 || t.length > 128) {
+    return { status: "invalid" };
+  }
+
+  return db.transaction(() => {
+    const row = db.prepare(`SELECT * FROM redeem_codes WHERE token = ?`).get(t);
+    if (!row) return { status: "invalid" };
+    if (!row.active) return { status: "disabled", id: row.id };
+
+    const maxOpens = Math.max(1, Number(row.max_opens) || 1);
+
+    if (row.open_count >= maxOpens) {
+      const attempt = row.quiz_session_id
+        ? db.prepare(`SELECT * FROM attempts WHERE session_id = ?`).get(row.quiz_session_id)
+        : null;
+      return {
+        status: "already_opened",
+        id: row.id,
+        opened_at: row.opened_at,
+        used_at: row.used_at,
+        open_count: row.open_count,
+        max_opens: maxOpens,
+        submitted: Boolean(attempt && attempt.submitted_at),
+        expired: isClaimExpired(row) && !(attempt && attempt.submitted_at),
+      };
+    }
+
+    const sessionId = crypto.randomBytes(16).toString("hex");
+    const ttlH = claimTtlHours();
+    const info = db
+      .prepare(
+        `UPDATE redeem_codes
+         SET open_count = open_count + 1,
+             opened_at = COALESCE(opened_at, datetime('now')),
+             used_at = datetime('now'),
+             quiz_session_id = ?,
+             claim_expires_at = datetime('now', ?)
+         WHERE id = ? AND open_count < ?`
+      )
+      .run(sessionId, `+${ttlH} hours`, row.id, maxOpens);
+
+    if (info.changes !== 1) {
+      const again = db.prepare(`SELECT * FROM redeem_codes WHERE id = ?`).get(row.id);
+      return {
+        status: "already_opened",
+        id: again.id,
+        opened_at: again.opened_at,
+        used_at: again.used_at,
+        open_count: again.open_count,
+        max_opens: maxOpens,
+      };
+    }
+
+    db.prepare(
+      `INSERT INTO attempts (session_id, code_id, code_text, user_agent) VALUES (?, ?, ?, ?)`
+    ).run(sessionId, row.id, row.code, userAgent || null);
+
+    // 一码一测：领取即占用测验名额（used_count），防止另开会话复测
+    db.prepare(
+      `UPDATE redeem_codes SET used_count = MIN(max_uses, used_count + 1) WHERE id = ?`
+    ).run(row.id);
+
+    const updated = db.prepare(`SELECT * FROM redeem_codes WHERE id = ?`).get(row.id);
+    return {
+      status: "ok",
+      id: updated.id,
+      code: updated.code,
+      note: updated.note,
+      opened_at: updated.opened_at,
+      used_at: updated.used_at,
+      open_count: updated.open_count,
+      max_opens: maxOpens,
+      sessionId,
+      claimExpiresAt: updated.claim_expires_at,
+      quizPath: `/?session=${sessionId}`,
+    };
+  })();
+}
+
 function validateCodeForUse(codeText) {
-  if (!codeText) return { ok: true, codeRow: null, optional: true };
+  if (!codeText) {
+    const err = new Error("需要通过发货链接领取后才能测验");
+    err.status = 400;
+    throw err;
+  }
   const row = getCodeByText(codeText);
   if (!row) {
     const err = new Error("兑换码无效");
@@ -196,7 +355,12 @@ function validateCodeForUse(codeText) {
     throw err;
   }
   if (row.used_count >= row.max_uses) {
-    const err = new Error("兑换码已用完");
+    const err = new Error("兑换码已用完（一码一测）");
+    err.status = 400;
+    throw err;
+  }
+  if (row.open_count > 0 && row.quiz_session_id) {
+    const err = new Error("请使用发货链接打开的测验会话，勿重复兑换");
     err.status = 400;
     throw err;
   }
@@ -225,6 +389,46 @@ function getAttempt(sessionId) {
   return db.prepare(`SELECT * FROM attempts WHERE session_id = ?`).get(sessionId);
 }
 
+/**
+ * 用领取会话继续测验：须未提交、未过期、且绑定该码。
+ */
+function resumeClaimSession(sessionId) {
+  const sid = String(sessionId || "").trim();
+  if (!sid) {
+    const err = new Error("缺少会话");
+    err.status = 400;
+    throw err;
+  }
+  const attempt = getAttempt(sid);
+  if (!attempt) {
+    const err = new Error("会话不存在或已失效");
+    err.status = 404;
+    throw err;
+  }
+  if (attempt.submitted_at) {
+    const err = new Error("该兑换已完成测验，无法重测（一码一测）");
+    err.status = 400;
+    throw err;
+  }
+  const codeRow = attempt.code_id ? getCodeById(attempt.code_id) : null;
+  if (!codeRow || codeRow.quiz_session_id !== sid) {
+    const err = new Error("会话与兑换码不匹配");
+    err.status = 400;
+    throw err;
+  }
+  if (!codeRow.active) {
+    const err = new Error("兑换码已停用");
+    err.status = 400;
+    throw err;
+  }
+  if (isClaimExpired(codeRow)) {
+    const err = new Error("领取已过期，请联系商家重新发货");
+    err.status = 400;
+    throw err;
+  }
+  return { attempt, codeRow };
+}
+
 function submitAttempt(sessionId, { resultTerm, answers, scores, consume }) {
   const attempt = getAttempt(sessionId);
   if (!attempt) {
@@ -238,8 +442,23 @@ function submitAttempt(sessionId, { resultTerm, answers, scores, consume }) {
     throw err;
   }
 
+  if (attempt.code_id) {
+    const codeRow = getCodeById(attempt.code_id);
+    if (codeRow && isClaimExpired(codeRow)) {
+      const err = new Error("领取已过期，无法提交");
+      err.status = 400;
+      throw err;
+    }
+  }
+
   const tx = db.transaction(() => {
-    if (consume && attempt.code_id) consumeCode(attempt.code_id);
+    // 领取时已占用 used_count；提交不再二次消耗，除非旧会话未走领取链路
+    if (consume && attempt.code_id) {
+      const row = getCodeById(attempt.code_id);
+      if (row && row.used_count < row.max_uses && !row.quiz_session_id) {
+        consumeCode(attempt.code_id);
+      }
+    }
     db.prepare(
       `UPDATE attempts SET result_term = ?, answers_json = ?, scores_json = ?, submitted_at = datetime('now') WHERE session_id = ?`
     ).run(resultTerm, JSON.stringify(answers), JSON.stringify(scores), sessionId);
@@ -257,7 +476,11 @@ function aggregateStats() {
     .all();
   const codes = db
     .prepare(
-      `SELECT COUNT(*) AS total, SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END) AS active, SUM(used_count) AS redemptions FROM redeem_codes`
+      `SELECT COUNT(*) AS total,
+              SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END) AS active,
+              SUM(used_count) AS redemptions,
+              SUM(CASE WHEN open_count > 0 THEN 1 ELSE 0 END) AS opened
+       FROM redeem_codes`
     )
     .get();
   const recent = db
@@ -284,4 +507,10 @@ module.exports = {
   ensureAdminPassword,
   verifyAdminPassword,
   changeAdminPassword,
+  getCodeByToken,
+  getCodeByQuizSession,
+  openDeliveryToken,
+  resumeClaimSession,
+  claimTtlHours,
+  makeDeliveryToken,
 };

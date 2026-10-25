@@ -35,17 +35,24 @@
   let sessionId = null;
   let lastResult = null;
 
-  // optional redeem code field injected on landing
-  function ensureCodeField() {
-    if (document.getElementById("redeem-code")) return;
+  function ensureGateUI() {
+    if (document.getElementById("redeem-gate")) return;
     const btn = els.btnStart;
     const wrap = document.createElement("div");
     wrap.className = "code-wrap";
+    wrap.id = "redeem-gate";
     wrap.innerHTML =
-      '<label class="code-label" for="redeem-code">兑换码（可选）</label>' +
-      '<input type="text" id="redeem-code" class="code-input" placeholder="有兑换码可填写" autocomplete="off" spellcheck="false" />' +
-      '<p class="code-hint">无兑换码也可直接测验；兑换码用于活动核销与统计。</p>';
+      '<p class="code-hint" id="gate-hint">本测验为一码一测：请通过商家发货链接领取后进入。打开发货页会展示卡密，并自动获得一次测验资格。</p>' +
+      '<p class="code-hint" id="gate-session" hidden></p>';
     btn.parentNode.insertBefore(wrap, btn);
+  }
+
+  function readQuery() {
+    const q = new URLSearchParams(location.search);
+    return {
+      session: (q.get("session") || "").trim(),
+      code: (q.get("code") || "").trim(),
+    };
   }
 
   // inject deep block container in result if missing
@@ -211,12 +218,17 @@
   function resetQuiz() {
     index = 0;
     answers = [];
-    sessionId = null;
     lastResult = null;
     questions = [];
+    // 一码一测：不清除已提交会话提示；用户需新发货链接
     const t = els.analyzing.querySelector(".analyzing-text");
     if (t) t.textContent = "正在对照二十四候…";
     showScreen("landing");
+    const gate = document.getElementById("gate-session");
+    if (gate) {
+      gate.hidden = false;
+      gate.textContent = "一码一测：同一兑换无法再次开测。如需重测请联系商家重新发货。";
+    }
   }
 
   async function copyShare() {
@@ -244,24 +256,30 @@
   }
 
   els.btnStart.addEventListener("click", async () => {
-    ensureCodeField();
-    const codeInput = document.getElementById("redeem-code");
-    const code = codeInput ? codeInput.value.trim() : "";
+    ensureGateUI();
+    const q = readQuery();
+    const sid = sessionId || q.session || localStorage.getItem("xinxiang-claim-session") || "";
+    if (!sid) {
+      alert("请先打开商家发货链接领取资格（一码一测）。");
+      return;
+    }
     els.btnStart.disabled = true;
     els.btnStart.textContent = "入候中…";
     try {
       const data = await api("/api/quiz/start", {
         method: "POST",
-        body: JSON.stringify({ code: code || undefined }),
+        body: JSON.stringify({ sessionId: sid }),
       });
       sessionId = data.sessionId;
+      localStorage.setItem("xinxiang-claim-session", sessionId);
       questions = data.questions;
       answers = Array(questions.length).fill(null);
       index = 0;
       showScreen("quiz");
       renderQuestion();
     } catch (e) {
-      alert(e.message || "无法开始测验，请确认已运行 npm start");
+      alert(e.message || "无法开始测验");
+      localStorage.removeItem("xinxiang-claim-session");
     } finally {
       els.btnStart.disabled = false;
       els.btnStart.textContent = "开始入候";
@@ -278,7 +296,27 @@
   els.btnRetry.addEventListener("click", resetQuiz);
   els.btnCopy.addEventListener("click", copyShare);
 
-  ensureCodeField();
+  ensureGateUI();
   ensureDeepBlock();
+
+  const bootQ = readQuery();
+  if (bootQ.session) {
+    sessionId = bootQ.session;
+    localStorage.setItem("xinxiang-claim-session", sessionId);
+    const gate = document.getElementById("gate-session");
+    if (gate) {
+      gate.hidden = false;
+      gate.textContent = "已检测到领取会话，可直接开始测验（一码一测，提交后不可重测）。";
+    }
+    const hint = document.getElementById("gate-hint");
+    if (hint) hint.hidden = true;
+  } else if (bootQ.code) {
+    const gate = document.getElementById("gate-session");
+    if (gate) {
+      gate.hidden = false;
+      gate.textContent = "检测到 ?code= 参数。正式开测请使用发货链接 /redeem/… 领取会话。卡密：" + bootQ.code;
+    }
+  }
+
   showScreen("landing");
 })();

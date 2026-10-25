@@ -91,3 +91,15 @@ psych-quiz/
 ├── render.yaml | railway.json | Procfile | Dockerfile
 └── README.md
 ```
+
+## 小红书一码一测发货链接
+
+1. 登录 `/admin.html`，生成兑换码。
+2. 复制「发货链接」：`https://xinxiang-jieqi.onrender.com/redeem/<token>`（URL 中是不透明 token，不是卡密明文）。
+3. 填入小红书自动发货模板（平台只发链接即可）。
+4. 买家**第一次**打开链接：展示卡密，并绑定一次测验会话（`/?session=...`）。
+5. **第二次及以后**打开：只显示「已失效/已领取」，不再展示卡密。
+6. 首页需持有领取会话才能开测；提交后同一码不可重测。领取后默认 24 小时内须完成（`CLAIM_TTL_HOURS`）。
+
+环境变量：`PUBLIC_BASE_URL`（后台复制链接用的公网域名）、`CLAIM_TTL_HOURS`。
+

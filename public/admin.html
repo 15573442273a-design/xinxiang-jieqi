@@ -9,7 +9,7 @@
 <body>
   <main class="admin">
     <h1>心象节气 · 管理</h1>
-    <p class="sub">兑换码发放、测验统计与密码管理（SQLite）</p>
+    <p class="sub">一码一测发货链接 · 兑换码 · 统计 · 密码（SQLite）</p>
 
     <section id="login-panel" class="card">
       <h2>登录</h2>
@@ -34,7 +34,9 @@
       </div>
 
       <div class="card">
-        <h2>新建兑换码</h2>
+        <h2>新建兑换码（小红书发货链接）</h2>
+        <p class="hint-inline">生成后复制「发货链接」填入小红书自动发货。买家打开一次可见卡密并获得一次测验资格；再次打开显示已失效。</p>
+        <p class="hint-inline">公网域名：<code id="public-base">https://xinxiang-jieqi.onrender.com</code></p>
         <div class="row">
           <div>
             <label>前缀 / 指定码（可选）</label>
@@ -45,13 +47,14 @@
             <input type="number" id="code-count" value="1" min="1" max="50" />
           </div>
           <div>
-            <label>每码可用次数</label>
-            <input type="number" id="code-uses" value="1" min="1" max="9999" />
+            <label>每码测验次数</label>
+            <input type="number" id="code-uses" value="1" min="1" max="1" title="一码一测，建议保持 1" />
           </div>
         </div>
         <label>备注</label>
-        <input type="text" id="code-note" placeholder="活动名等" />
+        <input type="text" id="code-note" placeholder="活动名 / 订单批次等" />
         <button type="button" id="btn-create">生成</button>
+        <button type="button" id="btn-copy-created" class="ghost">复制刚生成的链接</button>
         <pre id="created-out" class="out" hidden></pre>
       </div>
 
@@ -67,7 +70,8 @@
           <table>
             <thead>
               <tr>
-                <th>码</th>
+                <th>卡密</th>
+                <th>发货链接</th>
                 <th>备注</th>
                 <th>用量</th>
                 <th>状态</th>

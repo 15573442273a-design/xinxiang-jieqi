@@ -95,3 +95,9 @@ button.inline {
   width: auto;
   margin-left: 0.5rem;
 }
+
+.hint-inline { color: var(--muted); font-size: 0.85rem; margin: 0 0 0.75rem; line-height: 1.5; }
+.url-cell { max-width: 220px; }
+.url-cell .url { font-size: 0.72rem; word-break: break-all; }
+.actions { white-space: nowrap; }
+.actions button { display: block; }
